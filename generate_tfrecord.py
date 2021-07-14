@@ -7,6 +7,7 @@ import io
 import pandas as pd
 import tensorflow as tf
 import argparse
+import math
 
 from PIL import Image
 from tqdm import tqdm
@@ -123,20 +124,47 @@ if __name__ == '__main__':
                        metavar='output_path',
                        type=str,
                        help='Path to output TFRecord')
+   parser.add_argument('-s', 
+                       '--shard_size', 
+                       default=1000, 
+                       help='Number of examples per shard, default=1000')
 
    args = parser.parse_args()
 
+   examples_per_shard = args.shard_size
+
    class_dict = class_dict_from_pbtxt(args.pbtxt_input)
 
-   writer = tf.compat.v1.python_io.TFRecordWriter(args.output_path)
    path = os.path.join(args.image_dir)
    examples = pd.read_csv(args.csv_input)
    grouped = __split(examples, 'filename')
 
-   for group in tqdm(grouped, desc='groups'):
-      tf_example = create_tf_example(group, path, class_dict)
-      writer.write(tf_example.SerializeToString())
+   shards = []
+   print(len(grouped), ' total images')
+   while len(grouped) > 0:
+      if len(grouped) > examples_per_shard:
+         shards.append(grouped[:examples_per_shard])
+         grouped = grouped[examples_per_shard:]
+      if len(grouped) < examples_per_shard:
+         shards.append(grouped)
+         break
 
-   writer.close()
-   output_path = os.path.join(os.getcwd(), args.output_path)
-   print('Successfully created the TFRecords: {}'.format(output_path))
+   total_shards = len(shards)
+
+   print(total_shards, ' total shards')
+
+   for grouped in shards:
+
+      output_suffix = f"{shards.index(grouped)}_of_{len(shards)-1}_.tfrecords"
+
+      output_path = '-'.join([args.output_path, output_suffix])
+
+      writer = tf.compat.v1.python_io.TFRecordWriter(output_path)
+
+      for group in tqdm(grouped, desc='groups'):
+         tf_example = create_tf_example(group, path, class_dict)
+         writer.write(tf_example.SerializeToString())
+
+      writer.close()
+      output_path = os.path.join(os.getcwd(), args.output_path)
+      print('Successfully created the TFRecords: {}'.format(output_path))
